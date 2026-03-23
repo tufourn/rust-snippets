@@ -92,7 +92,7 @@ fn moves_are_memcpy() {
 fn pinning_an_unpin_does_nothing() {
     let f = Foo { bar: 69 };
 
-    // the pin! macro pins a value on the stack and takes ownership
+    // the pin! macro pins a value on the stack and shadows it
     // we can only access it via the Pin pointer afterwards
     let pinned_foo: Pin<&mut Foo> = pin!(f);
 
@@ -119,6 +119,7 @@ fn pinning_not_unpin_disallows_getting_mut() {
     // the value stays at this address until it's dropped
 }
 
+// it's possible to violate the pinning contract, but only with unsafe
 fn violating_the_pinning_contract() {
     // We say that a value has been pinned when it has been put into a state
     // where it is guaranteed to remain located at the same place in memory
@@ -171,7 +172,7 @@ fn pinning_futures() {
     let waker = std::task::Waker::noop();
     let mut cx = Context::from_waker(waker);
 
-    // pin! consumes the value, no way to (safely) get &mut fut afterwards
+    // pin! shadows the value, no way to (safely) get &mut fut afterwards
     let mut fut = pin!(SelfRefFuture {
         s: String::from("hello"),
         s_ptr: std::ptr::null(),
@@ -214,14 +215,14 @@ fn why_poll_requires_pin() {
     println!("why_poll_requires_pin(): before move: {:p}", addr_of!(fut));
 
     // this would be a violation of the pinning contract
-    let mut fut = fut;
+    let mut fut2 = fut;
 
-    println!("why_poll_requires_pin(): after  move: {:p}", addr_of!(fut));
-    println!("  fut.s     = {:p}", &fut.s as *const String);
-    println!("  fut.s_ptr = {:p} <- doesn't point to fut.s", fut.s_ptr,);
+    println!("why_poll_requires_pin(): after  move: {:p}", addr_of!(fut2));
+    println!("  fut.s     = {:p}", &fut2.s as *const String);
+    println!("  fut.s_ptr = {:p} <- doesn't point to fut.s", fut2.s_ptr,);
 
     {
-        let fut_mut_ref = &mut fut;
+        let fut_mut_ref = &mut fut2;
         let p = fut_mut_ref.poll_not_pin(&mut cx);
         assert!(matches!(p, Poll::Ready(_)));
         if let Poll::Ready(result) = p {
@@ -253,21 +254,21 @@ fn violating_contract_breaks_futures() {
     );
 
     // this would be a violation of the pinning contract
-    let mut fut = fut;
+    let mut fut2 = fut;
 
     println!(
         "violating_contract_breaks_futures(): after  move: {:p}",
-        addr_of!(fut)
+        addr_of!(fut2)
     );
-    println!("  fut.s     = {:p}", &fut.s as *const String);
-    println!("  fut.s_ptr = {:p} <- doesn't point to fut.s", fut.s_ptr,);
+    println!("  fut.s     = {:p}", &fut2.s as *const String);
+    println!("  fut.s_ptr = {:p} <- doesn't point to fut.s", fut2.s_ptr,);
 
     // this poll() dereferences s_ptr, which is dangling
-    let mut pinned = unsafe { Pin::new_unchecked(&mut fut) };
+    let mut pinned = unsafe { Pin::new_unchecked(&mut fut2) };
     if let Poll::Ready(result) = pinned.as_mut().poll(&mut cx) {
         println!("result: {result}");
     }
 }
 
 // executors/runtimes like tokio is responsible for upholding this pinning contract
-// by only accessing futures through Pin<&mut F>, and never moving it after creation
+// by only accessing futures through Pin<&mut F>, and never moving it after pinning
