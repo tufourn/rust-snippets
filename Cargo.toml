@@ -3,4 +3,5 @@ resolver = "3"
 members = [
 	"crates/handrolled_futures"
 	, "crates/pinning"
+	, "crates/dag_future"
 ]
